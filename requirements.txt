@@ -1,0 +1,11 @@
+requests
+beautifulsoup4
+lxml
+numpy==1.26.4
+pandas==2.2.2
+matplotlib
+sqlalchemy
+python-dotenv
+python-dateutil
+tqdm
+tabulate

@@ -1,0 +1,37 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Python environments
+.venv/
+venv/
+ENV/
+SCI/
+SCI_new/
+
+# Python caches and tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Generated data, databases, reports, and logs
+data/
+logs/
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+ubereats_apple_reviews_us.csv
+python_test_output.txt
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
