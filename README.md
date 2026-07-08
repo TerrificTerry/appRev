@@ -93,6 +93,19 @@ By default, generated files are written under `data/apple_review_collection/`:
 - `reviews_by_app/`: one CSV per app
 - `apple_reviews.sqlite`: normalized SQLite database
 
+## Reusable Ingestion Pipeline
+
+The reusable pipeline modules live in `collector/`, `database/`, and `pipeline/`.
+Run a one-app ingestion directly with:
+
+```powershell
+python -m pipeline.run_pipeline --app-id 1058959277 --country us --pages 1
+```
+
+The default SQLite output is `data/apple_review_pipeline/apple_reviews.sqlite`.
+Repeated runs are idempotent by `(source_app_id, source_review_id)` and are
+tracked in `ingestion_runs`.
+
 ## Desktop GUI
 
 ```powershell
