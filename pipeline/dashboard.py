@@ -21,6 +21,7 @@ class RecentRun:
 
 @dataclass(frozen=True)
 class RecentReview:
+    ingestion_run_id: int
     app_name: str
     country: str
     rating: int
@@ -75,12 +76,12 @@ def load_database_dashboard(
         ).fetchall()
         review_rows = connection.execute(
             """
-            SELECT apps.canonical_name AS app_name, reviews.country, reviews.rating,
-                   reviews.title, reviews.review_date
+            SELECT reviews.ingestion_run_id, apps.canonical_name AS app_name,
+                   reviews.country, reviews.rating, reviews.title, reviews.review_date
             FROM reviews
             JOIN source_apps ON reviews.source_app_id = source_apps.source_app_id
             JOIN apps ON source_apps.app_id = apps.app_id
-            ORDER BY reviews.review_date DESC
+            ORDER BY reviews.ingestion_run_id DESC, reviews.review_pk DESC
             LIMIT ?
             """,
             (recent_limit,),
@@ -111,6 +112,7 @@ def load_database_dashboard(
             ],
             recent_reviews=[
                 RecentReview(
+                    ingestion_run_id=int(row["ingestion_run_id"]),
                     app_name=str(row["app_name"]),
                     country=str(row["country"]),
                     rating=int(row["rating"]),
@@ -120,4 +122,3 @@ def load_database_dashboard(
                 for row in review_rows
             ],
         )
-

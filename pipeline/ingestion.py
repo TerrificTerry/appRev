@@ -326,6 +326,19 @@ def upsert_reviews(
                 )
                 updated += 1
             else:
+                connection.execute(
+                    """
+                    UPDATE reviews
+                    SET ingestion_run_id = ?,
+                        collected_at = ?
+                    WHERE review_pk = ?
+                    """,
+                    (
+                        ingestion_run_id,
+                        review.collected_at,
+                        review_pk,
+                    ),
+                )
                 skipped += 1
 
         _write_quality(connection, review_pk, review)
@@ -337,4 +350,3 @@ def upsert_reviews(
         records_updated=updated,
         records_skipped=skipped,
     )
-

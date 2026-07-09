@@ -7,7 +7,9 @@ from contextlib import closing
 from pathlib import Path
 
 from pipeline.cleaner import clean_reviews, normalize_text, text_hash
-from pipeline.run_pipeline import run_pipeline
+from pipeline.dashboard import load_database_dashboard
+from pipeline.run_pipeline import parse_country_codes, run_pipeline, run_pipeline_for_countries
+from pipeline.web_gui import _validate_run_config
 
 
 def sample_reviews() -> list[dict]:
@@ -57,7 +59,33 @@ def fake_duplicate_collector(**_: object) -> list[dict]:
     return duplicate_text_reviews()
 
 
+def fake_country_collector(**kwargs: object) -> list[dict]:
+    country = str(kwargs["country"])
+    rows = []
+    for row in sample_reviews():
+        rows.append({**row, "country": country, "review_id": f"{country}-{row['review_id']}"})
+    return rows
+
+
 class AppleReviewPipelineTests(unittest.TestCase):
+    def test_parse_country_codes_accepts_commas_and_deduplicates(self) -> None:
+        self.assertEqual(parse_country_codes("US, ca, gb,us"), ["us", "ca", "gb"])
+
+    def test_web_gui_config_accepts_comma_separated_countries(self) -> None:
+        config = _validate_run_config(
+            {
+                "app_id": "1058959277",
+                "app_name": "Uber Eats",
+                "countries": "us,ca,gb",
+                "pages": 1,
+                "retries": 3,
+                "delay_seconds": 0.25,
+                "repeat": 1,
+            }
+        )
+
+        self.assertEqual(config["countries"], ["us", "ca", "gb"])
+
     def test_cleaner_preserves_raw_review_text_and_generates_features(self) -> None:
         raw = sample_reviews()[0]
         result = clean_reviews([raw])
@@ -97,8 +125,58 @@ class AppleReviewPipelineTests(unittest.TestCase):
             with closing(sqlite3.connect(db_path)) as connection:
                 review_count = connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
                 run_count = connection.execute("SELECT COUNT(*) FROM ingestion_runs").fetchone()[0]
+                latest_review_run_id = connection.execute(
+                    "SELECT MIN(ingestion_run_id), MAX(ingestion_run_id) FROM reviews"
+                ).fetchone()
 
             self.assertEqual(review_count, 2)
+            self.assertEqual(run_count, 2)
+            self.assertEqual(latest_review_run_id, (second.ingestion_run_id, second.ingestion_run_id))
+
+    def test_dashboard_recent_reviews_show_latest_seen_run(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "reviews.sqlite"
+
+            run_pipeline(
+                app_id="1058959277",
+                country="us",
+                pages=1,
+                db_path=db_path,
+                collector=fake_collector,
+            )
+            second = run_pipeline(
+                app_id="1058959277",
+                country="us",
+                pages=1,
+                db_path=db_path,
+                collector=fake_collector,
+            )
+
+            dashboard = load_database_dashboard(db_path)
+
+            self.assertTrue(dashboard.recent_reviews)
+            self.assertEqual(dashboard.recent_reviews[0].ingestion_run_id, second.ingestion_run_id)
+
+    def test_pipeline_runs_all_comma_separated_countries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            db_path = Path(tmp_dir) / "reviews.sqlite"
+
+            summaries = run_pipeline_for_countries(
+                app_id="1058959277",
+                countries="us,ca",
+                pages=1,
+                db_path=db_path,
+                collector=fake_country_collector,
+            )
+
+            self.assertEqual([summary.country for summary in summaries], ["us", "ca"])
+            self.assertEqual(sum(summary.records_inserted for summary in summaries), 4)
+
+            with closing(sqlite3.connect(db_path)) as connection:
+                review_count = connection.execute("SELECT COUNT(*) FROM reviews").fetchone()[0]
+                run_count = connection.execute("SELECT COUNT(*) FROM ingestion_runs").fetchone()[0]
+
+            self.assertEqual(review_count, 4)
             self.assertEqual(run_count, 2)
 
     def test_duplicate_text_quality_flag_is_set(self) -> None:

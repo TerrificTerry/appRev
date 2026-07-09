@@ -102,6 +102,12 @@ Run a one-app ingestion directly with:
 python -m pipeline.run_pipeline --app-id 1058959277 --country us --pages 1
 ```
 
+You can pass multiple storefront countries as comma-separated codes:
+
+```powershell
+python -m pipeline.run_pipeline --app-id 1058959277 --country us,ca,gb --pages 1
+```
+
 The default SQLite output is `data/apple_review_pipeline/apple_reviews.sqlite`.
 Repeated runs are idempotent by `(source_app_id, source_review_id)` and are
 tracked in `ingestion_runs`.
@@ -112,9 +118,13 @@ Launch the lightweight local web GUI with:
 .\SCI_new\Scripts\python.exe -m pipeline.web_gui
 ```
 
-Then open `http://127.0.0.1:8765` in a browser. The GUI is a thin wrapper over
-the same pipeline entry point; it does not duplicate collector, cleaner, or
-database logic.
+Then open `http://127.0.0.1:8765` in a browser. The Countries field accepts
+comma-separated codes such as `us,ca,gb`, and the quick-select list can fill
+that field for you. The GUI is a thin wrapper over the same pipeline entry
+point; it does not duplicate collector, cleaner, or database logic.
+The Recent Reviews table is ordered by the latest ingestion run that observed
+each review, so rerunning the same query brings that run's seen reviews back to
+the top without duplicating rows.
 
 On Windows you can also run:
 

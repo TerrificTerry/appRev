@@ -17,7 +17,7 @@ if __package__ in {None, ""}:
 
 from database.db import DEFAULT_DB_PATH
 from pipeline.dashboard import load_database_dashboard
-from pipeline.run_pipeline import run_pipeline
+from pipeline.run_pipeline import parse_country_codes, run_pipeline
 
 
 RUN_STATE = {
@@ -98,15 +98,17 @@ HTML = """<!doctype html>
       font-size: 12px;
       margin-bottom: 5px;
     }
-    input {
+    input,
+    select {
       width: 100%;
-      min-height: 36px;
       border: 1px solid var(--line);
       border-radius: 4px;
       padding: 7px 9px;
       color: var(--text);
       background: white;
     }
+    input { min-height: 36px; }
+    select { min-height: 108px; }
     .wide { grid-column: span 2; }
     .actions {
       display: flex;
@@ -221,7 +223,7 @@ HTML = """<!doctype html>
           <input id="app_name" value="Uber Eats">
         </div>
         <div>
-          <label for="country">Country</label>
+          <label for="country">Countries</label>
           <input id="country" value="us">
         </div>
         <div>
@@ -239,6 +241,31 @@ HTML = """<!doctype html>
         <div class="wide">
           <label for="db_path">SQLite database</label>
           <input id="db_path" value="__DEFAULT_DB_PATH__">
+        </div>
+        <div class="wide">
+          <label for="country_select">Country quick select</label>
+          <select id="country_select" multiple>
+            <option value="us" selected>US - United States</option>
+            <option value="ca">CA - Canada</option>
+            <option value="gb">GB - United Kingdom</option>
+            <option value="au">AU - Australia</option>
+            <option value="nz">NZ - New Zealand</option>
+            <option value="ie">IE - Ireland</option>
+            <option value="de">DE - Germany</option>
+            <option value="fr">FR - France</option>
+            <option value="es">ES - Spain</option>
+            <option value="it">IT - Italy</option>
+            <option value="nl">NL - Netherlands</option>
+            <option value="be">BE - Belgium</option>
+            <option value="ch">CH - Switzerland</option>
+            <option value="mx">MX - Mexico</option>
+            <option value="br">BR - Brazil</option>
+            <option value="jp">JP - Japan</option>
+            <option value="tw">TW - Taiwan</option>
+            <option value="hk">HK - Hong Kong</option>
+            <option value="sg">SG - Singapore</option>
+            <option value="za">ZA - South Africa</option>
+          </select>
         </div>
       </div>
       <div class="actions">
@@ -275,7 +302,7 @@ HTML = """<!doctype html>
         <h2>Recent Reviews</h2>
         <table>
           <thead>
-            <tr><th>App</th><th>Country</th><th>Rating</th><th>Title</th></tr>
+            <tr><th>Run ID</th><th>App</th><th>Country</th><th>Rating</th><th>Title</th></tr>
           </thead>
           <tbody id="reviews_body"></tbody>
         </table>
@@ -290,13 +317,22 @@ HTML = """<!doctype html>
 
   <script>
     const $ = (id) => document.getElementById(id);
-    const fields = ["app_id", "app_name", "country", "pages", "retries", "delay_seconds", "db_path"];
+    const fields = ["app_id", "app_name", "country", "country_select", "pages", "retries", "delay_seconds", "db_path"];
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
 
     function payload(repeat) {
       return {
         app_id: $("app_id").value.trim(),
         app_name: $("app_name").value.trim(),
-        country: $("country").value.trim(),
+        countries: $("country").value.trim(),
         pages: Number($("pages").value),
         retries: Number($("retries").value),
         delay_seconds: Number($("delay_seconds").value),
@@ -343,10 +379,10 @@ HTML = """<!doctype html>
       $("m_dup").textContent = data.duplicate_text_reviews;
 
       $("runs_body").innerHTML = data.recent_runs.map((run) =>
-        `<tr><td>${run.ingestion_run_id}</td><td>${run.status}</td><td>${run.records_seen}</td><td>${run.records_inserted}</td><td>${run.records_updated}</td><td>${run.records_skipped}</td></tr>`
+        `<tr><td>${run.ingestion_run_id}</td><td>${escapeHtml(run.status)}</td><td>${run.records_seen}</td><td>${run.records_inserted}</td><td>${run.records_updated}</td><td>${run.records_skipped}</td></tr>`
       ).join("");
       $("reviews_body").innerHTML = data.recent_reviews.map((review) =>
-        `<tr><td>${review.app_name}</td><td>${review.country}</td><td>${review.rating}</td><td>${review.title || ""}</td></tr>`
+        `<tr><td>${review.ingestion_run_id}</td><td>${escapeHtml(review.app_name)}</td><td>${escapeHtml(review.country)}</td><td>${review.rating}</td><td>${escapeHtml(review.title || "")}</td></tr>`
       ).join("");
     }
 
@@ -361,6 +397,10 @@ HTML = """<!doctype html>
 
     $("run_once").addEventListener("click", () => startRun(1));
     $("run_twice").addEventListener("click", () => startRun(2));
+    $("country_select").addEventListener("change", () => {
+      const selected = Array.from($("country_select").selectedOptions).map((option) => option.value);
+      if (selected.length) $("country").value = selected.join(",");
+    });
     $("refresh").addEventListener("click", refreshStatus);
     $("clear_log").addEventListener("click", async () => {
       await api("/api/clear-log", {method: "POST"});
@@ -412,42 +452,45 @@ def _append_log(message: str) -> None:
 
 def _run_worker(config: dict) -> None:
     repeat = int(config["repeat"])
+    countries = list(config["countries"])
     summaries: list[dict] = []
 
     try:
         _append_log(
-            f"Starting pipeline: app_id={config['app_id']}, country={config['country']}, "
+            f"Starting pipeline: app_id={config['app_id']}, countries={','.join(countries)}, "
             f"pages={config['pages']}, repeat={repeat}"
         )
         for run_number in range(1, repeat + 1):
-            started = time.monotonic()
-            summary = run_pipeline(
-                app_id=config["app_id"],
-                country=config["country"],
-                pages=int(config["pages"]),
-                app_name=config.get("app_name") or None,
-                db_path=Path(config["db_path"]),
-                retries=int(config["retries"]),
-                delay_seconds=float(config["delay_seconds"]),
-            )
-            elapsed = time.monotonic() - started
-            summary_dict = asdict(summary)
-            summary_dict["database_path"] = str(summary.database_path)
-            summaries.append(summary_dict)
-            _append_log(
-                " | ".join(
-                    [
-                        f"Run {run_number}/{repeat}",
-                        f"id={summary.ingestion_run_id}",
-                        f"status={summary.status}",
-                        f"collected={summary.records_collected}",
-                        f"inserted={summary.records_inserted}",
-                        f"updated={summary.records_updated}",
-                        f"skipped={summary.records_skipped}",
-                        f"elapsed={elapsed:.1f}s",
-                    ]
+            for country in countries:
+                started = time.monotonic()
+                summary = run_pipeline(
+                    app_id=config["app_id"],
+                    country=country,
+                    pages=int(config["pages"]),
+                    app_name=config.get("app_name") or None,
+                    db_path=Path(config["db_path"]),
+                    retries=int(config["retries"]),
+                    delay_seconds=float(config["delay_seconds"]),
                 )
-            )
+                elapsed = time.monotonic() - started
+                summary_dict = asdict(summary)
+                summary_dict["database_path"] = str(summary.database_path)
+                summaries.append(summary_dict)
+                _append_log(
+                    " | ".join(
+                        [
+                            f"Run {run_number}/{repeat}",
+                            f"country={country}",
+                            f"id={summary.ingestion_run_id}",
+                            f"status={summary.status}",
+                            f"collected={summary.records_collected}",
+                            f"inserted={summary.records_inserted}",
+                            f"updated={summary.records_updated}",
+                            f"skipped={summary.records_skipped}",
+                            f"elapsed={elapsed:.1f}s",
+                        ]
+                    )
+                )
 
         if repeat == 2:
             _append_log("Idempotency check complete. On unchanged data, the second run should have inserted=0.")
@@ -465,7 +508,8 @@ def _run_worker(config: dict) -> None:
 def _validate_run_config(config: dict) -> dict:
     app_id = str(config.get("app_id", "")).strip()
     app_name = str(config.get("app_name", "")).strip()
-    country = str(config.get("country", "")).strip().lower()
+    raw_countries = str(config.get("countries") or config.get("country", "")).strip().lower()
+    countries = parse_country_codes(raw_countries)
     db_path = str(config.get("db_path", "")).strip() or str(DEFAULT_DB_PATH)
     pages = int(config.get("pages", 1))
     retries = int(config.get("retries", 3))
@@ -474,8 +518,6 @@ def _validate_run_config(config: dict) -> dict:
 
     if not app_id:
         raise ValueError("Apple app id is required.")
-    if not country:
-        raise ValueError("Country is required.")
     if pages < 1:
         raise ValueError("Pages must be at least 1.")
     if retries < 0:
@@ -488,7 +530,7 @@ def _validate_run_config(config: dict) -> dict:
     return {
         "app_id": app_id,
         "app_name": app_name,
-        "country": country,
+        "countries": countries,
         "pages": pages,
         "retries": retries,
         "delay_seconds": delay_seconds,
