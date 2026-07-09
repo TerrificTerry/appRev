@@ -106,6 +106,22 @@ The default SQLite output is `data/apple_review_pipeline/apple_reviews.sqlite`.
 Repeated runs are idempotent by `(source_app_id, source_review_id)` and are
 tracked in `ingestion_runs`.
 
+Launch the lightweight local web GUI with:
+
+```powershell
+.\SCI_new\Scripts\python.exe -m pipeline.web_gui
+```
+
+Then open `http://127.0.0.1:8765` in a browser. The GUI is a thin wrapper over
+the same pipeline entry point; it does not duplicate collector, cleaner, or
+database logic.
+
+On Windows you can also run:
+
+```powershell
+.\scripts\run_pipeline_web_gui.cmd
+```
+
 ## Desktop GUI
 
 ```powershell
